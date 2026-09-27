@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BGM Player Console</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 20px;
+      background-color: #ffffff;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    .bgm-container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+
+    /* Header Banner */
+    .bgm-header {
+      background-color: #dbe7f6;
+      border: 2px solid #3b629b;
+      text-align: center;
+      padding: 12px 10px;
+      margin-bottom: 20px;
+    }
+
+    .bgm-header h1 {
+      margin: 0;
+      font-size: 38px;
+      font-weight: normal;
+      color: #000000;
+      letter-spacing: 0.5px;
+    }
+
+    /* Action Button */
+    .bgm-action-btn {
+      background-color: #fff2cc;
+      border: 1px solid #d6b656;
+      padding: 8px 18px;
+      font-size: 18px;
+      color: #000000;
+      cursor: pointer;
+      margin-bottom: 20px;
+      display: inline-block;
+      border-radius: 0;
+    }
+
+    .bgm-action-btn:hover {
+      background-color: #ffe599;
+    }
+
+    .bgm-action-btn:active {
+      background-color: #fce5cd;
+    }
+
+    /* Sound Grid */
+    .bgm-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    /* Sound Card */
+    .bgm-card {
+      background-color: #dbe7f6;
+      padding: 16px 12px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .bgm-title {
+      font-weight: bold;
+      font-size: 20px;
+      color: #000000;
+      margin-bottom: 12px;
+    }
+
+    /* Circular Play Button */
+    .bgm-play-btn {
+      width: 130px;
+      height: 130px;
+      border-radius: 50%;
+      background-color: #689bd2;
+      border: 6px solid #ffffff;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+      outline: none;
+      transition: transform 0.1s ease, background-color 0.1s ease;
+    }
+
+    .bgm-play-btn:hover {
+      background-color: #5587be;
+    }
+
+    .bgm-play-btn:active {
+      transform: scale(0.96);
+    }
+
+    .bgm-play-btn svg {
+      width: 60px;
+      height: 60px;
+      fill: #ffffff;
+      margin-left: 6px;
+    }
+
+    /* Status Text */
+    .bgm-status {
+      margin-top: 10px;
+      font-size: 12px;
+      color: #444444;
+      min-height: 16px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="bgm-container">
+  <div class="bgm-header">
+    <h1>BGM Player Console</h1>
+  </div>
+
+  <button class="bgm-action-btn" onclick="eraseCacheAndReload()">Erase Cache and Reload</button>
+
+  <div class="bgm-grid" id="bgmGrid">
+    <!-- Dynamic cards generated via JavaScript -->
+  </div>
+</div>
+
+<script>
+  // Replace these filenames with the exact names of the audio files you uploaded to GitHub
+  // You can also still paste full Google Drive URLs here if preferred.
+  const soundList = [
+    { id: 1, name: "Sound 1", fileUrl: "sound1.mp3" },
+    { id: 2, name: "Sound 2", fileUrl: "sound2.mp3" },
+    { id: 3, name: "Sound 3", fileUrl: "sound3.mp3" },
+    { id: 4, name: "Sound 4", fileUrl: "sound4.mp3" },
+    { id: 5, name: "Sound 5", fileUrl: "sound5.mp3" },
+    { id: 6, name: "Sound 6", fileUrl: "sound6.mp3" }
+  ];
+
+  const DB_NAME = "BGMConsoleAudioCacheDB";
+  const STORE_NAME = "audioFiles";
+  let db = null;
+  let activeAudio = null;
+  let activeSoundId = null;
+
+  // Initialize IndexedDB
+  function initDB() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = (e) => {
+        db = e.target.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME);
+        }
+      };
+      request.onsuccess = (e) => {
+        db = e.target.result;
+        resolve(db);
+      };
+      request.onerror = (e) => reject(e);
+    });
+  }
+
+  // Get cached audio blob from IndexedDB
+  function getCachedAudio(key) {
+    return new Promise((resolve) => {
+      const tx = db.transaction(STORE_NAME, "readonly");
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.get(key);
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    });
+  }
+
+  // Save downloaded audio blob to IndexedDB
+  function setCachedAudio(key, blob) {
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(STORE_NAME, "readwrite");
+      const store = tx.objectStore(STORE_NAME);
+      const req = store.put(blob, key);
+      req.onsuccess = () => resolve();
+      req.onerror = (e) => reject(e);
+    });
+  }
+
+  // Play audio (from cache or download from repository)
+  async function playSound(id, fileUrl) {
+    const statusElem = document.getElementById(`status-${id}`);
+
+    // If user clicks currently playing sound, stop it
+    if (activeAudio && activeSoundId === id) {
+      activeAudio.pause();
+      activeAudio.currentTime = 0;
+      activeSoundId = null;
+      statusElem.textContent = "Stopped";
+      return;
+    }
+
+    // Stop existing playback
+    if (activeAudio) {
+      activeAudio.pause();
+      activeAudio.currentTime = 0;
+      if (activeSoundId) {
+        const prevStatus = document.getElementById(`status-${activeSoundId}`);
+        if (prevStatus) prevStatus.textContent = "";
+      }
+    }
+
+    try {
+      statusElem.textContent = "Checking cache...";
+      let audioBlob = await getCachedAudio(id);
+
+      if (!audioBlob) {
+        statusElem.textContent = "Caching for offline...";
+        const response = await fetch(fileUrl);
+        
+        if (!response.ok) throw new Error("Fetch failed");
+
+        audioBlob = await response.blob();
+        await setCachedAudio(id, audioBlob);
+        statusElem.textContent = "Cached & Playing";
+      } else {
+        statusElem.textContent = "Playing from Cache";
+      }
+
+      const audioObjectUrl = URL.createObjectURL(audioBlob);
+      activeAudio = new Audio(audioObjectUrl);
+      activeSoundId = id;
+
+      activeAudio.play();
+
+      activeAudio.onended = () => {
+        statusElem.textContent = "Finished";
+        activeSoundId = null;
+      };
+    } catch (err) {
+      console.error(err);
+      statusElem.textContent = "Failed to load audio";
+    }
+  }
+
+  // Erase cache and reload
+  async function eraseCacheAndReload() {
+    if (db) {
+      db.close();
+    }
+    const deleteReq = indexedDB.deleteDatabase(DB_NAME);
+    deleteReq.onsuccess = () => {
+      location.reload();
+    };
+    deleteReq.onerror = () => {
+      alert("Failed to clear offline cache.");
+    };
+  }
+
+  // Render sound buttons on grid
+  function renderConsole() {
+    const grid = document.getElementById("bgmGrid");
+    grid.innerHTML = soundList.map(sound => `
+      <div class="bgm-card">
+        <div class="bgm-title">${sound.name}</div>
+        <button class="bgm-play-btn" onclick="playSound(${sound.id}, '${sound.fileUrl}')" title="Play ${sound.name}">
+          <svg viewBox="0 0 24 24">
+            <path d="M8 5v14l11-7z"/>
+          </svg>
+        </button>
+        <div class="bgm-status" id="status-${sound.id}"></div>
+      </div>
+    `).join('');
+  }
+
+  // Initialize on load
+  document.addEventListener("DOMContentLoaded", async () => {
+    renderConsole();
+    await initDB();
+  });
+</script>
+
+</body>
+</html>
